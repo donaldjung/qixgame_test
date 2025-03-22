@@ -22,27 +22,25 @@ GREEN = (0, 255, 0)    # Qix
 playfield = pygame.Surface((WIDTH, HEIGHT))
 playfield.fill(BLACK)  # Initially unclaimed
 
-# Claim the border (2 pixels wide for clarity)
-BORDER_WIDTH = 2
-playfield.fill(BLUE, (0, 0, WIDTH, BORDER_WIDTH))          # Top
-playfield.fill(BLUE, (0, HEIGHT-BORDER_WIDTH, WIDTH, BORDER_WIDTH))  # Bottom
-playfield.fill(BLUE, (0, 0, BORDER_WIDTH, HEIGHT))         # Left
-playfield.fill(BLUE, (WIDTH-BORDER_WIDTH, 0, BORDER_WIDTH, HEIGHT))  # Right
+# Claim the border
+playfield.fill(BLUE, (0, 0, WIDTH, 1))          # Top
+playfield.fill(BLUE, (0, HEIGHT-1, WIDTH, 1))   # Bottom
+playfield.fill(BLUE, (0, 0, 1, HEIGHT))         # Left
+playfield.fill(BLUE, (WIDTH-1, 0, 1, HEIGHT))   # Right
 
-# Unclaimed mask
+# Unclaimed mask (1 = unclaimed, 0 = claimed)
 unclaimed_mask = pygame.Mask((WIDTH, HEIGHT))
 unclaimed_mask.fill()  # All pixels set to 1
+# Set border to 0 (claimed)
 for x in range(WIDTH):
-    for y in range(BORDER_WIDTH):
-        unclaimed_mask.set_at((x, y), 0)  # Top
-        unclaimed_mask.set_at((x, HEIGHT-1-y), 0)  # Bottom
+    unclaimed_mask.set_at((x, 0), 0)
+    unclaimed_mask.set_at((x, HEIGHT-1), 0)
 for y in range(HEIGHT):
-    for x in range(BORDER_WIDTH):
-        unclaimed_mask.set_at((x, y), 0)  # Left
-        unclaimed_mask.set_at((WIDTH-1-x, y), 0)  # Right
+    unclaimed_mask.set_at((0, y), 0)
+    unclaimed_mask.set_at((WIDTH-1, y), 0)
 
 # Player variables
-player_pos = [BORDER_WIDTH, BORDER_WIDTH]  # Start on top-left corner of unclaimed area next to border
+player_pos = [1, 1]  # Start on edge (unclaimed pixel next to claimed)
 is_drawing = False
 path = []
 current_direction = None
@@ -52,19 +50,16 @@ qix_pos = [WIDTH // 2, HEIGHT // 2]
 qix_speed = 2
 qix_direction = [1, 0]
 
-# Path surface
+# Path surface for drawing
 path_surface = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
-path_surface.fill((0, 0, 0, 0))
+path_surface.fill((0, 0, 0, 0))  # Transparent background
 
-# Check if position is on the edge or border
+# Check if position is on the edge
 def is_on_edge(pos):
     x, y = pos
-    # Allow movement on claimed border or unclaimed pixels next to it
-    if playfield.get_at((x, y)) == BLUE:
-        return True
-    if playfield.get_at((x, y)) != BLACK:
+    if playfield.get_at((x, y)) != BLACK:  # Not unclaimed
         return False
-    # Check adjacency to claimed area
+    # Check if adjacent to a claimed pixel
     for dx, dy in [(0, -1), (0, 1), (-1, 0), (1, 0)]:
         nx, ny = x + dx, y + dy
         if 0 <= nx < WIDTH and 0 <= ny < HEIGHT and playfield.get_at((nx, ny)) == BLUE:
@@ -98,42 +93,50 @@ while True:
                 if is_on_edge(new_pos):
                     player_pos = new_pos
                 else:
+                    # Start drawing into unclaimed area
                     is_drawing = True
                     path = [player_pos.copy()]
                     current_direction = (dx, dy)
                     player_pos = new_pos
             else:
                 if playfield.get_at(new_pos) == BLACK:
+                    # Update path if direction changes
                     new_direction = (dx, dy)
                     if new_direction != current_direction:
                         path.append(player_pos.copy())
                         current_direction = new_direction
                     player_pos = new_pos
+                    # Check if returned to edge
                     if is_on_edge(player_pos):
                         path.append(player_pos.copy())
+                        # Claim area
                         path_surface.fill((0, 0, 0, 0))
                         if len(path) > 1:
                             pygame.draw.lines(path_surface, WHITE, False, path, 1)
                         path_mask = pygame.mask.from_surface(path_surface, threshold=1)
                         temp_mask = unclaimed_mask.copy()
                         temp_mask.erase(path_mask, (0, 0))
+                        # Choose seed points based on first path segment
                         if len(path) >= 2:
                             p0, p1 = path[0], path[1]
-                            if p0[0] == p1[0]:
+                            if p0[0] == p1[0]:  # Vertical
                                 seed1 = (max(0, p0[0] - 1), p0[1])
                                 seed2 = (min(WIDTH-1, p0[0] + 1), p0[1])
-                            else:
+                            else:  # Horizontal
                                 seed1 = (p0[0], max(0, p0[1] - 1))
                                 seed2 = (p0[0], min(HEIGHT-1, p0[1] + 1))
+                            # Try seed1
                             if temp_mask.get_at(seed1):
                                 connected_area = temp_mask.connected_component(seed1)
                                 if not connected_area.get_at(qix_pos):
+                                    # Claim this area
                                     for x in range(WIDTH):
                                         for y in range(HEIGHT):
                                             if connected_area.get_at((x, y)):
                                                 playfield.set_at((x, y), BLUE)
                                                 unclaimed_mask.set_at((x, y), 0)
                                 else:
+                                    # Try seed2
                                     if temp_mask.get_at(seed2):
                                         connected_area = temp_mask.connected_component(seed2)
                                         if not connected_area.get_at(qix_pos):
@@ -147,7 +150,7 @@ while True:
 
     # Move Qix
     new_qix_pos = [qix_pos[0] + qix_direction[0] * qix_speed, qix_pos[1] + qix_direction[1] * qix_speed]
-    if (0 <= new_qix_pos[0] < WIDTH and 0 <= new_pos[1] < HEIGHT and 
+    if (0 <= new_qix_pos[0] < WIDTH and 0 <= new_qix_pos[1] < HEIGHT and 
         playfield.get_at(new_qix_pos) == BLACK and path_surface.get_at(new_qix_pos) == (0, 0, 0, 0)):
         qix_pos = new_qix_pos
     else:
@@ -156,7 +159,8 @@ while True:
     # Check collision
     if is_drawing and path_surface.get_at(qix_pos) != (0, 0, 0, 0):
         print("Collision! Player loses.")
-        player_pos = [BORDER_WIDTH, BORDER_WIDTH]
+        # For simplicity, reset player
+        player_pos = [1, 1]
         is_drawing = False
         path = []
         path_surface.fill((0, 0, 0, 0))
